@@ -15,7 +15,7 @@ env:
   CARGO_TERM_COLOR: always
   # プロジェクト設定 - ここを変更してください
   BINARY_NAME: rs_imgviewer  # ← ここを変更
-  PROJECT_NAME:rs-imgviewer  # ← ここを変更（ハイフン区切り）
+  PROJECT_NAME: rs-imgviewer  # ← ここを変更（ハイフン区切り）
 
 jobs:
   prepare:
