@@ -1,18 +1,20 @@
 # .github/workflows/release.yml
 name: Release Build
 
+# GITHUB_TOKEN にコンテンツの書き込み権限を与える
+permissions:
+  contents: write
+
 on:
   release:
     types: [published]
 
 jobs:
-  build-windows:
-    name: Build (Windows, MSVC) and Upload
+  build:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Setup Rust (MSVC)
         uses: actions-rs/toolchain@v1
@@ -29,4 +31,3 @@ jobs:
           files: target/release/rs_imgviewer.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
