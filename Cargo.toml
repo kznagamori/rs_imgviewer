@@ -1,0 +1,28 @@
+[package]
+name = "rs_imgviewer"
+version = "0.1.0"
+edition = "2024"
+description = "High-speed image viewer with WebP support"
+authors = ["kznagamori"]
+license = "MIT"
+
+[dependencies]
+# CLI 引数パース
+clap = { version = "4.3", features = ["derive"] }
+# ログ出力
+log   = "0.4"
+fern  = "0.6"
+chrono = "0.4"
+# 設定ファイル読み込み（TOML）
+serde = { version = "1.0", features = ["derive"] }
+toml  = "0.5"
+# 画像読み込み（JPEG, PNG, WEBP を有効化）
+image = { version = "0.24", default-features = false, features = ["png", "jpeg", "webp"] }
+# 画像表示ライブラリ
+show-image = { version = "0.14", features = ["image", "macros"] }
+# 画面解像度取得用（Windows のみ）
+windows = { version = "0.48", features = ["Win32_UI_WindowsAndMessaging"], optional = true }
+
+[features]
+default = ["native-win"]
+native-win = ["windows"]
