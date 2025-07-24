@@ -1,7 +1,7 @@
 #![windows_subsystem = "windows"]
 //! rs_imgviewer: Rust 製高速画像ビューアー
 //!
-//! JPEG/PNG/WEBP に対応し、ディレクトリ指定時はソートしたファイル一覧を順次表示します。
+//! JPEG/PNG/WEBP に対応し、ディレクトリ指定時はソートされた画像リストを順次表示します。
 
 use clap::Parser;
 use fern::Dispatch;
@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_
 
 /// コマンドライン引数
 #[derive(Parser)]
-#[command(name = "rs_imgviewer", about = "高速画像ビューアー")]  
+#[command(name = "rs_imgviewer", about = "高速画像ビューアー")]
 struct Args {
     /// 表示するファイルまたはディレクトリのパス
     path: PathBuf,
@@ -74,7 +74,7 @@ sort_algorithm = "FileName"
     let config: Config = toml::from_str(&fs::read_to_string(&config_path)?)?;
     info!("Loaded config: {:?}", config);
 
-    // ファイルリスト取得
+    // 画像ファイル一覧取得
     let (dir, mut idx) = if args.path.is_file() {
         let dir = args.path.parent().unwrap().to_path_buf();
         let files = collect_image_paths(&dir, &config.sort_algorithm);
@@ -90,7 +90,7 @@ sort_algorithm = "FileName"
     }
     info!("{} ファイルを {} でロード", files.len(), dir.display());
 
-    // 最初の画像をロードして表示サイズ・ウィンドウ生成
+    // 最初の画像をロードして表示
     let dyn_img = image::open(&files[idx])?;
     let rgba = dyn_img.to_rgba8();
     let (iw, ih) = rgba.dimensions();
@@ -108,31 +108,28 @@ sort_algorithm = "FileName"
 
     // イベントループ
     'outer: loop {
-        // キーイベント待ち
-        let ev = event_rx.recv()?;
-        if let WindowEvent::KeyboardInput(k) = ev {
-            if k.input.state == event::ElementState::Pressed {
-                use event::VirtualKeyCode;
-                match (k.input.key_code, k.input.modifiers.alt()) {
-                    // 終了
-                    (Some(VirtualKeyCode::Return), _) |
-                    (Some(VirtualKeyCode::Escape), _) |
-                    (Some(VirtualKeyCode::F4), true) => break 'outer,
-                    // 次へ
-                    (Some(VirtualKeyCode::Right), _) |
-                    (Some(VirtualKeyCode::X), _) => idx = (idx + 1) % files.len(),
-                    // 前へ
-                    (Some(VirtualKeyCode::Left), _) |
-                    (Some(VirtualKeyCode::Z), _) => idx = (idx + files.len() - 1) % files.len(),
-                    _ => continue,
+        if let Ok(ev) = event_rx.recv() {
+            if let WindowEvent::KeyboardInput(k) = ev {
+                if k.input.state == event::ElementState::Pressed {
+                    use event::VirtualKeyCode;
+                    match (k.input.key_code, k.input.modifiers.alt()) {
+                        (Some(VirtualKeyCode::Return), _)
+                        | (Some(VirtualKeyCode::Escape), _)
+                        | (Some(VirtualKeyCode::F4), true) => break 'outer,
+                        (Some(VirtualKeyCode::Right), _)
+                        | (Some(VirtualKeyCode::X), _) => idx = (idx + 1) % files.len(),
+                        (Some(VirtualKeyCode::Left), _)
+                        | (Some(VirtualKeyCode::Z), _) => idx = (idx + files.len() - 1) % files.len(),
+                        _ => continue,
+                    }
+                    // 画像更新
+                    let dyn_img = image::open(&files[idx])?;
+                    let rgba = dyn_img.to_rgba8();
+                    let (iw, ih) = rgba.dimensions();
+                    let raw = rgba.into_raw();
+                    let (_disp_w, _disp_h) = compute_display_size(&dyn_img, &config);
+                    window.set_image("img-0", ImageView::new(ImageInfo::rgba8(iw, ih), &raw))?;
                 }
-                // 画像更新
-                let dyn_img = image::open(&files[idx])?;
-                let rgba = dyn_img.to_rgba8();
-                let (iw, ih) = rgba.dimensions();
-                let raw = rgba.into_raw();
-                let (_disp_w, _disp_h) = compute_display_size(&dyn_img, &config);
-                window.set_image("img-0", ImageView::new(ImageInfo::rgba8(iw, ih), &raw))?;
             }
         }
     }
@@ -157,7 +154,7 @@ fn init_logger() -> Result<(), fern::InitError> {
     Ok(())
 }
 
-/// 指定ディレクトリから画像ファイルを収集、ソートして返す
+/// 指定ディレクトリから画像ファイルを収集し、ソートして返す
 fn collect_image_paths(dir: &Path, alg: &SortAlgorithm) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {
@@ -172,9 +169,19 @@ fn collect_image_paths(dir: &Path, alg: &SortAlgorithm) -> Vec<PathBuf> {
         }
     }
     match alg {
-        SortAlgorithm::FileName => files.sort_by_key(|p| p.file_name().and_then(|n| n.to_str().map(|s| s.to_lowercase())).unwrap_or_default()),
-        SortAlgorithm::CreatedTime => files.sort_by_key(|p| fs::metadata(p).and_then(|m| m.created()).unwrap_or(SystemTime::UNIX_EPOCH)),
-        SortAlgorithm::ModifiedTime => files.sort_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH)),
+        SortAlgorithm::FileName => {
+            files.sort_by(|a, b| {
+                let na = a.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                let nb = b.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                if let (Ok(x), Ok(y)) = (na.parse::<u64>(), nb.parse::<u64>()) {
+                    x.cmp(&y)
+                } else {
+                    na.to_lowercase().cmp(&nb.to_lowercase())
+                }
+            });
+        }
+        SortAlgorithm::CreatedTime => files.sort_by_key(|p| {fs::metadata(p).and_then(|m| m.created()).unwrap_or(SystemTime::UNIX_EPOCH)}),
+        SortAlgorithm::ModifiedTime => files.sort_by_key(|p| {fs::metadata(p).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH)}),
     }
     files
 }
